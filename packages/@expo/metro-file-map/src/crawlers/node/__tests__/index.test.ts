@@ -5,32 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 
 import H from '../../../constants';
 import TreeFS from '../../../lib/TreeFS';
 import type { CrawlerOptions, FileData, FileMetadata, PerfLogger } from '../../../types';
-import hasNativeFindSupport from '../hasNativeFindSupport';
 import nodeCrawl from '../index';
 
-jest.mock('../hasNativeFindSupport', () => ({
-  __esModule: true,
-  default: jest.fn().mockResolvedValue(false),
-}));
-jest.mock('child_process', () => ({
-  spawn: jest.fn(),
-}));
-jest.mock('os', () => ({
-  ...jest.requireActual('os'),
-  platform: () => 'linux',
-}));
-
 const rootDir = '/project';
-const processFile = () => null;
-const mockedSpawn = jest.mocked(spawn);
-const mockedHasNativeFindSupport = jest.mocked(hasNativeFindSupport);
+const processFile = async () => null;
 
 function makeTreeFS(files?: FileData): TreeFS {
   return new TreeFS({ rootDir, files, processFile });
@@ -65,8 +48,6 @@ function sorted(iter: IterableIterator<string>): string[] {
 describe('node crawler', () => {
   beforeEach(() => {
     vol.reset();
-    mockedHasNativeFindSupport.mockResolvedValue(false);
-    mockedSpawn.mockReset();
   });
 
   test('discovers files by extension', async () => {
@@ -133,12 +114,16 @@ describe('node crawler', () => {
       '/project/fruits/tomato.js': 'same',
     });
 
-    // Get the mtime that memfs assigned to tomato so we can match it
+    // Get the mtime that memfs assigned to each file
     const tomatoStat = vol.statSync('/project/fruits/tomato.js');
+    const strawberryStat = vol.statSync('/project/fruits/strawberry.js');
 
     const previousFiles: FileData = new Map([
       // strawberry has a different mtime → will be reported as changed
-      ['fruits/strawberry.js', [0, 0, 1, null, 0, null] as FileMetadata],
+      [
+        'fruits/strawberry.js',
+        [strawberryStat.mtime.getTime() - 1000, 0, 1, null, 0, null] as FileMetadata,
+      ],
       // tomato has matching mtime → unchanged, excluded from changedFiles
       [
         'fruits/tomato.js',
@@ -234,7 +219,7 @@ describe('node crawler', () => {
     expect(changedFiles.get('fruits/apple.js')![H.SYMLINK]).toBe(0);
   });
 
-  test('populates file metadata correctly', async () => {
+  test('populates file metadata with null mtime on cold start', async () => {
     vol.fromJSON({
       '/project/fruits/apple.js': 'hello',
     });
@@ -243,85 +228,119 @@ describe('node crawler', () => {
     const meta = changedFiles.get('fruits/apple.js')!;
 
     expect(meta).toBeDefined();
-    expect(meta[H.MTIME]).toBeGreaterThan(0);
-    expect(meta[H.SIZE]).toBe(5); // 'hello'.length
+    // On cold start (empty previous FS), stat is deferred
+    expect(meta[H.MTIME]).toBeNull();
+    expect(meta[H.SIZE]).toBe(0);
     expect(meta[H.VISITED]).toBe(0);
     expect(meta[H.SHA1]).toBeNull();
     expect(meta[H.SYMLINK]).toBe(0);
   });
 
-  describe('native find', () => {
-    function mockSpawnFind(filePaths: string[]) {
-      mockedSpawn.mockImplementation((() => {
-        const stdout = new EventEmitter() as EventEmitter & {
-          setEncoding: jest.Mock;
-        };
-        stdout.setEncoding = jest.fn();
-        process.nextTick(() => {
-          stdout.emit('data', filePaths.join('\n'));
-          process.nextTick(() => stdout.emit('close'));
-        });
-        return { stdout, on: jest.fn() };
-      }) as any);
-    }
-
-    beforeEach(() => {
-      mockedHasNativeFindSupport.mockResolvedValue(true);
+  test('skips lstat for files with no prior mtime', async () => {
+    vol.fromJSON({
+      '/project/fruits/apple.js': 'a',
+      '/project/fruits/banana.js': 'b',
     });
 
-    test('uses native find when available', async () => {
-      vol.fromJSON({
-        '/project/fruits/apple.js': 'a',
-        '/project/fruits/pear.js': 'b',
-        '/project/fruits/tomato.js': 'c',
-      });
+    const previousFiles: FileData = new Map([
+      ['fruits/apple.js', [null, 0, 0, null, 0, null] as FileMetadata],
+      ['fruits/banana.js', [null, 0, 0, null, 0, null] as FileMetadata],
+    ]);
 
-      mockSpawnFind([
-        '/project/fruits/apple.js',
-        '/project/fruits/pear.js',
-        '/project/fruits/tomato.js',
-      ]);
-
-      const { changedFiles } = await crawl({
-        forceNodeFilesystemAPI: false,
-        ignore: (p: string) => /pear/.test(p),
-      });
-
-      expect(mockedSpawn).toHaveBeenCalledWith('find', expect.arrayContaining(['/project/fruits']));
-
-      expect(sorted(changedFiles.keys())).toEqual(['fruits/apple.js', 'fruits/tomato.js']);
+    const { changedFiles, removedFiles } = await crawl({
+      previousState: {
+        fileSystem: makeTreeFS(previousFiles),
+        clocks: new Map(),
+      },
     });
 
-    test('constructs correct find expression for extensions', async () => {
-      vol.fromJSON({
-        '/project/fruits/apple.js': 'a',
-      });
+    // Both files had null mtime → stat deferred, getDifference treats as unchanged
+    expect(changedFiles).toEqual(new Map());
+    expect(removedFiles).toEqual(new Set());
+  });
 
-      mockSpawnFind(['/project/fruits/apple.js']);
-
-      await crawl({
-        forceNodeFilesystemAPI: false,
-        extensions: ['js', 'json'],
-      });
-
-      const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
-      expect(spawnArgs).toContain('-iname');
-      expect(spawnArgs).toContain('*.js');
-      expect(spawnArgs).toContain('*.json');
+  test('calls lstat only for files with existing mtime', async () => {
+    vol.fromJSON({
+      '/project/fruits/apple.js': 'a',
+      '/project/fruits/banana.js': 'b',
     });
 
-    test('falls back to node fs when forceNodeFilesystemAPI is true', async () => {
-      vol.fromJSON({
-        '/project/fruits/apple.js': 'a',
-      });
+    const appleStat = vol.statSync('/project/fruits/apple.js');
 
-      const { changedFiles } = await crawl({
-        forceNodeFilesystemAPI: true,
-      });
+    const previousFiles: FileData = new Map([
+      // apple has a real mtime → will be lstat'd, mtime differs → changed
+      ['fruits/apple.js', [appleStat.mtime.getTime() - 1000, 0, 1, null, 0, null] as FileMetadata],
+      // banana has null mtime → stat is deferred
+      ['fruits/banana.js', [null, 0, 0, null, 0, null] as FileMetadata],
+    ]);
 
-      expect(mockedSpawn).not.toHaveBeenCalled();
-      expect(sorted(changedFiles.keys())).toEqual(['fruits/apple.js']);
+    const { changedFiles, removedFiles } = await crawl({
+      previousState: {
+        fileSystem: makeTreeFS(previousFiles),
+        clocks: new Map(),
+      },
     });
+
+    // apple was lstat'd (real mtime in result), banana was not (absent from changedFiles)
+    expect(changedFiles).toEqual(
+      new Map([
+        [
+          'fruits/apple.js',
+          [appleStat.mtime.getTime(), appleStat.size, 0, null, 0, null] as FileMetadata,
+        ],
+      ])
+    );
+    expect(removedFiles).toEqual(new Set());
+  });
+
+  test('excludes unchanged files when lstat mtime matches cache', async () => {
+    vol.fromJSON({
+      '/project/fruits/apple.js': 'a',
+      '/project/fruits/banana.js': 'b',
+    });
+
+    const appleStat = vol.statSync('/project/fruits/apple.js');
+    const bananaStat = vol.statSync('/project/fruits/banana.js');
+
+    const previousFiles: FileData = new Map([
+      [
+        'fruits/apple.js',
+        [appleStat.mtime.getTime(), appleStat.size, 1, null, 0, null] as FileMetadata,
+      ],
+      [
+        'fruits/banana.js',
+        [bananaStat.mtime.getTime(), bananaStat.size, 1, null, 0, null] as FileMetadata,
+      ],
+    ]);
+
+    const { changedFiles, removedFiles } = await crawl({
+      previousState: {
+        fileSystem: makeTreeFS(previousFiles),
+        clocks: new Map(),
+      },
+    });
+
+    // Both files have matching mtime → lstat'd but unchanged
+    expect(changedFiles).toEqual(new Map());
+    expect(removedFiles).toEqual(new Set());
+  });
+
+  test('marks symlinks correctly when stat is skipped', async () => {
+    vol.fromJSON({
+      '/project/fruits/apple.js': 'a',
+      '/project/fruits/target.js': 'target',
+    });
+    vol.symlinkSync('/project/fruits/target.js', '/project/fruits/link.js');
+
+    const { changedFiles } = await crawl({ includeSymlinks: true });
+
+    const linkMeta = changedFiles.get('fruits/link.js')!;
+    expect(linkMeta).toBeDefined();
+    // On cold start, mtime is deferred
+    expect(linkMeta[H.MTIME]).toBeNull();
+    expect(linkMeta[H.SIZE]).toBe(0);
+    // But symlink flag is still correctly set
+    expect(linkMeta[H.SYMLINK]).toBe(1);
   });
 
   describe('abort signal', () => {

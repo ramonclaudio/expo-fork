@@ -21,6 +21,7 @@ import TreeFS from './lib/TreeFS';
 import checkWatchmanCapabilities from './lib/checkWatchmanCapabilities';
 import normalizePathSeparatorsToPosix from './lib/normalizePathSeparatorsToPosix';
 import normalizePathSeparatorsToSystem from './lib/normalizePathSeparatorsToSystem';
+import removeOverlappingRoots from './lib/removeOverlappingRoots';
 import type {
   BuildParameters,
   BuildResult,
@@ -148,7 +149,7 @@ export type {
 // This should be bumped whenever a code change to `metro-file-map` itself
 // would cause a change to the cache data structure and/or content (for a given
 // filesystem state and build parameters).
-const CACHE_BREAKER = '11';
+const CACHE_BREAKER = '12';
 
 const CHANGE_INTERVAL = 30;
 
@@ -316,7 +317,7 @@ export default class FileMap extends EventEmitter {
       plugins,
       retainAllFiles: options.retainAllFiles,
       rootDir: options.rootDir,
-      roots: Array.from(new Set(options.roots)),
+      roots: removeOverlappingRoots(options.roots),
     };
 
     this.#options = {
@@ -324,7 +325,7 @@ export default class FileMap extends EventEmitter {
       healthCheck: options.healthCheck,
       perfLoggerFactory: options.perfLoggerFactory,
       resetCache: options.resetCache,
-      useWatchman: options.useWatchman == null ? true : options.useWatchman,
+      useWatchman: options.useWatchman ?? false,
       watch: !!options.watch,
       watchmanDeferStates: options.watchmanDeferStates ?? [],
     };
@@ -367,8 +368,8 @@ export default class FileMap extends EventEmitter {
 
         const rootDir = this.#options.rootDir;
         this.#startupPerfLogger?.point('constructFileSystem_start');
-        const processFile: ProcessFileFunction = (normalPath, metadata, opts) => {
-          const result = this.#fileProcessor.processRegularFile(normalPath, metadata, {
+        const processFile: ProcessFileFunction = async (normalPath, metadata, opts) => {
+          const result = await this.#fileProcessor.processRegularFile(normalPath, metadata, {
             computeSha1: opts.computeSha1,
             maybeReturnContent: true,
           });
@@ -532,7 +533,9 @@ export default class FileMap extends EventEmitter {
         .readlink(this.#pathUtils.normalToAbsolute(normalPath))
         .then((symlinkTarget) => {
           fileMetadata[H.VISITED] = 1;
-          fileMetadata[H.SYMLINK] = symlinkTarget;
+          fileMetadata[H.SYMLINK] = normalizePathSeparatorsToPosix(
+            this.#pathUtils.resolveSymlinkToNormal(normalPath, symlinkTarget)
+          );
         });
     }
     return null;
@@ -575,7 +578,9 @@ export default class FileMap extends EventEmitter {
 
       if (fileData[H.SYMLINK] === 0) {
         filesToProcess.push([normalFilePath, fileData]);
-      } else {
+      } else if (fileData[H.MTIME] != null && fileData[H.MTIME] !== 0) {
+        // The symlink will only be updated, if it's been accessed before
+        // If this is a newly crawled entry, it's skipped
         const maybeReadLink = this.#maybeReadLink(normalFilePath, fileData);
         if (maybeReadLink) {
           readLinkPromises.push(

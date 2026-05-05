@@ -5,10 +5,13 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import fs from 'fs';
 import invariant from 'invariant';
 import path from 'path';
 
 import H from '../constants';
+import normalizePathSeparatorsToPosix from './normalizePathSeparatorsToPosix';
+import normalizePathSeparatorsToSystem from './normalizePathSeparatorsToSystem';
 import type {
   CacheData,
   FileData,
@@ -32,12 +35,6 @@ function isDirectory(node: MixedNode | null | undefined): node is DirectoryNode 
 
 function isRegularFile(node: FileNode): boolean {
   return node[H.SYMLINK] === 0;
-}
-
-interface NormalizedSymlinkTarget {
-  ancestorOfRootIdx: number | null;
-  normalPath: string;
-  startOfBasenameIdx: number;
 }
 
 interface DeserializedSnapshotInput {
@@ -122,7 +119,6 @@ interface MetadataIteratorOptions {
  *   a trailing slash
  */
 export default class TreeFS implements MutableFileSystem {
-  readonly #cachedNormalSymlinkTargets: WeakMap<FileNode, NormalizedSymlinkTarget> = new WeakMap();
   readonly #pathUtils: RootPathUtils;
   readonly #processFile: ProcessFileFunction;
   readonly #rootDir: Path;
@@ -203,11 +199,16 @@ export default class TreeFS implements MutableFileSystem {
         }
         if (
           newMetadata[H.MTIME] != null &&
-          // TODO: Remove when mtime is null if not populated
           newMetadata[H.MTIME] !== 0 &&
           newMetadata[H.MTIME] === metadata[H.MTIME]
         ) {
           // Types and modified time match - not changed.
+          changedFiles.delete(canonicalPath);
+        } else if (
+          (newMetadata[H.MTIME] == null || newMetadata[H.MTIME] === 0) &&
+          (metadata[H.MTIME] == null || metadata[H.MTIME] === 0)
+        ) {
+          // If file is still untouched then mark it as unchanged
           changedFiles.delete(canonicalPath);
         } else if (
           newMetadata[H.SHA1] != null &&
@@ -229,6 +230,13 @@ export default class TreeFS implements MutableFileSystem {
     };
   }
 
+  getMtimeByNormalPath(normalPath: Path): number | null {
+    const result = this.#lookupByNormalPath(normalPath, {
+      followLeaf: false,
+    });
+    return result.exists && !isDirectory(result.node) ? result.node[H.MTIME] : null;
+  }
+
   getSha1(mixedPath: Path): string | null {
     const fileMetadata = this.#getFileData(mixedPath);
     return (fileMetadata && fileMetadata[H.SHA1]) ?? null;
@@ -245,6 +253,18 @@ export default class TreeFS implements MutableFileSystem {
       return null;
     }
     const { canonicalPath, node: fileMetadata } = result;
+
+    // Populate mtime and size on demand
+    if (fileMetadata[H.MTIME] == null || fileMetadata[H.MTIME] === 0) {
+      fileMetadata[H.SHA1] = null;
+      const absolutePath = this.#pathUtils.normalToAbsolute(canonicalPath);
+      try {
+        const stat = await fs.promises.lstat(absolutePath);
+        const diskMtime = stat.mtime.getTime();
+        fileMetadata[H.MTIME] = diskMtime;
+        fileMetadata[H.SIZE] = stat.size;
+      } catch {}
+    }
 
     // Empty strings
     const existing = fileMetadata[H.SHA1];
@@ -703,6 +723,13 @@ export default class TreeFS implements MutableFileSystem {
           segmentNode,
           currentPath
         );
+        if (normalSymlinkTarget == null) {
+          return {
+            canonicalMissingPath: currentPath,
+            exists: false,
+            missingSegmentName: segmentName,
+          };
+        }
         if (opts.collectLinkPaths) {
           opts.collectLinkPaths.add(this.#pathUtils.normalToAbsolute(currentPath));
         }
@@ -712,7 +739,7 @@ export default class TreeFS implements MutableFileSystem {
         // Append any subsequent path segments to the symlink target, and reset
         // with our new target.
         const joinedResult = this.#pathUtils.joinNormalToRelative(
-          normalSymlinkTarget.normalPath,
+          normalSymlinkTarget,
           remainingTargetPath
         );
 
@@ -732,7 +759,8 @@ export default class TreeFS implements MutableFileSystem {
           collectAncestors &&
           !isLastSegment &&
           // No-op optimisation to bail out the common case of nothing to do.
-          (normalSymlinkTarget.ancestorOfRootIdx === 0 || joinedResult.collapsedSegments > 0)
+          ((ancestorOfRootIdx = this.#pathUtils.getAncestorOfRootIdx(normalSymlinkTarget)) === 0 ||
+            joinedResult.collapsedSegments > 0)
         ) {
           let node: MixedNode = this.#rootNode;
           let collapsedPath = '';
@@ -742,7 +770,7 @@ export default class TreeFS implements MutableFileSystem {
               // Add the root only if the target is the root or we have
               // collapsed segments.
               i > 0 ||
-              normalSymlinkTarget.ancestorOfRootIdx === 0 ||
+              ancestorOfRootIdx === 0 ||
               joinedResult.collapsedSegments > 0
             ) {
               reverseAncestors.push({
@@ -762,7 +790,7 @@ export default class TreeFS implements MutableFileSystem {
         // the symlink target, and start collecting ancestors only
         // from the target itself (ie, the basename of the normal target path)
         // onwards.
-        unseenPathFromIdx = normalSymlinkTarget.startOfBasenameIdx;
+        unseenPathFromIdx = normalSymlinkTarget.lastIndexOf(path.sep) + 1;
 
         if (seen == null) {
           // Optimisation: set this lazily only when we've encountered a symlink
@@ -1162,28 +1190,32 @@ export default class TreeFS implements MutableFileSystem {
   #resolveSymlinkTargetToNormalPath(
     symlinkNode: FileMetadata,
     canonicalPathOfSymlink: Path
-  ): NormalizedSymlinkTarget {
-    const cachedResult = this.#cachedNormalSymlinkTargets.get(symlinkNode);
-    if (cachedResult != null) {
-      return cachedResult;
+  ): Path | null {
+    const symlinkTarget = symlinkNode[H.SYMLINK];
+    if (symlinkTarget === 1) {
+      // Symlink target not yet resolved — read it lazily on first traversal
+      const absoluteSymlink = this.#pathUtils.normalToAbsolute(canonicalPathOfSymlink);
+      try {
+        const literalSymlinkTarget = fs.readlinkSync(absoluteSymlink);
+        const normalTarget = this.#pathUtils.resolveSymlinkToNormal(
+          canonicalPathOfSymlink,
+          literalSymlinkTarget
+        );
+        symlinkNode[H.SYMLINK] = normalizePathSeparatorsToPosix(normalTarget);
+        symlinkNode[H.VISITED] = 1;
+        return normalTarget;
+      } catch {
+        return null;
+      }
+    } else if (symlinkTarget === 0 || symlinkTarget == null) {
+      // WARN: We shouldn't call this method on non-symlinks. Outside of tests
+      // this condition shouldn't trigger. It's fine not to resolve a symlink if
+      // it does trigger however
+      return null;
+    } else {
+      invariant(typeof symlinkTarget === 'string', 'Expected symlink target to be populated.');
+      return normalizePathSeparatorsToSystem(symlinkTarget);
     }
-
-    const literalSymlinkTarget = symlinkNode[H.SYMLINK];
-    invariant(typeof literalSymlinkTarget === 'string', 'Expected symlink target to be populated.');
-    const absoluteSymlinkTarget = path.resolve(
-      this.#rootDir,
-      canonicalPathOfSymlink,
-      '..', // Symlink target is relative to its containing directory.
-      literalSymlinkTarget // May be absolute, in which case the above are ignored
-    );
-    const normalSymlinkTarget = path.relative(this.#rootDir, absoluteSymlinkTarget);
-    const result = {
-      ancestorOfRootIdx: this.#pathUtils.getAncestorOfRootIdx(normalSymlinkTarget),
-      normalPath: normalSymlinkTarget,
-      startOfBasenameIdx: normalSymlinkTarget.lastIndexOf(path.sep) + 1,
-    };
-    this.#cachedNormalSymlinkTargets.set(symlinkNode, result);
-    return result;
   }
 
   #getFileData(

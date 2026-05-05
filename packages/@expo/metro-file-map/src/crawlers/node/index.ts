@@ -7,16 +7,18 @@
  * @format
  */
 
-import { spawn } from 'child_process';
-import * as fs from 'graceful-fs';
-import { platform } from 'os';
+import * as fs from 'fs';
 import * as path from 'path';
 
-import hasNativeFindSupport from './hasNativeFindSupport';
 import { RootPathUtils } from '../../lib/RootPathUtils';
-import type { Console, CrawlerOptions, CrawlResult, FileData, IgnoreMatcher } from '../../types';
-
-const debug = require('debug')('Metro:NodeCrawler');
+import type {
+  Console,
+  CrawlerOptions,
+  CrawlResult,
+  FileData,
+  FileSystem,
+  IgnoreMatcher,
+} from '../../types';
 
 type Callback = (result: FileData) => void;
 
@@ -27,13 +29,22 @@ function find(
   includeSymlinks: boolean,
   rootDir: string,
   console: Console,
+  previousFileSystem: FileSystem | null,
   callback: Callback
 ): void {
   const result: FileData = new Map();
   let activeCalls = 0;
   const pathUtils = new RootPathUtils(rootDir);
 
-  function search(directory: string): void {
+  const exts = extensions.reduce(
+    (acc, ext) => {
+      acc[ext] = true;
+      return acc;
+    },
+    {} as Record<string, boolean | undefined>
+  );
+
+  function search(directory: string, dirNormal: string, isWithinRoot: boolean): void {
     activeCalls++;
     fs.readdir(directory, { withFileTypes: true }, (err, entries) => {
       activeCalls--;
@@ -42,46 +53,62 @@ function find(
           `Error "${(err as any).code ?? err.message}" reading contents of "${directory}", skipping. Add this directory to your ignore list to exclude it.`
         );
       } else {
-        entries.forEach((entry: fs.Dirent) => {
-          const file = path.join(directory, entry.name.toString());
+        for (let idx = 0; idx < entries.length; idx++) {
+          const entry = entries[idx]!;
+          const name = entry.name.toString();
+          const file = directory + path.sep + name;
 
-          if (ignore(file)) {
-            return;
+          const isSymbolicLink = entry.isSymbolicLink();
+          if (ignore(file) || (!includeSymlinks && isSymbolicLink)) {
+            continue;
           }
 
-          if (entry.isSymbolicLink() && !includeSymlinks) {
-            return;
-          }
+          // Deriving a normal path above the root dir requires slicing off an up-fragment
+          // then checking if the target matches the next segment of the root dir. It's therefore
+          // easier to fall back to `pathUtils.absoluteToNormal`
+          const childNormal = !isWithinRoot
+            ? pathUtils.absoluteToNormal(file)
+            : dirNormal === ''
+              ? name
+              : dirNormal + path.sep + name;
 
           if (entry.isDirectory()) {
-            search(file);
-            return;
+            search(file, childNormal, isWithinRoot || childNormal === '');
+            continue;
           }
 
-          activeCalls++;
+          const ext = path.extname(file).substr(1);
+          if (!isSymbolicLink && !exts[ext]) {
+            continue;
+          }
 
-          fs.lstat(file, (err, stat) => {
-            activeCalls--;
+          const mtime = previousFileSystem?.getMtimeByNormalPath(childNormal);
+          if (mtime == null || mtime === 0) {
+            // When we're in a cold start or a previous file doesn't exist, we can skip
+            // the mtime/size lstat now and treat the file as new
+            result.set(childNormal, [null, 0, 0, null, isSymbolicLink ? 1 : 0, null]);
+          } else {
+            activeCalls++;
+            fs.lstat(file, (err, stat) => {
+              activeCalls--;
 
-            if (!err && stat) {
-              const ext = path.extname(file).substr(1);
-              if (stat.isSymbolicLink() || extensions.includes(ext)) {
-                result.set(pathUtils.absoluteToNormal(file), [
+              if (!err && stat) {
+                result.set(childNormal, [
                   stat.mtime.getTime(),
                   stat.size,
                   0,
                   null,
-                  stat.isSymbolicLink() ? 1 : 0,
+                  isSymbolicLink ? 1 : 0,
                   null,
                 ]);
               }
-            }
 
-            if (activeCalls === 0) {
-              callback(result);
-            }
-          });
-        });
+              if (activeCalls === 0) {
+                callback(result);
+              }
+            });
+          }
+        }
       }
 
       if (activeCalls === 0) {
@@ -91,72 +118,14 @@ function find(
   }
 
   if (roots.length > 0) {
-    roots.forEach(search);
+    for (const root of roots) {
+      const rootNormal = pathUtils.absoluteToNormal(root);
+      const isWithinRoot = !rootNormal.startsWith('..' + path.sep);
+      search(root, rootNormal, isWithinRoot);
+    }
   } else {
     callback(result);
   }
-}
-
-function findNative(
-  roots: readonly string[],
-  extensions: readonly string[],
-  ignore: IgnoreMatcher,
-  includeSymlinks: boolean,
-  rootDir: string,
-  console: Console,
-  callback: Callback
-): void {
-  // Examples:
-  // ( ( -type f ( -iname *.js ) ) )
-  // ( ( -type f ( -iname *.js -o -iname *.ts ) ) )
-  // ( ( -type f ( -iname *.js ) ) -o -type l )
-  // ( ( -type f ) -o -type l )
-  const extensionClause = extensions.length
-    ? `( ${extensions.map((ext) => `-iname *.${ext}`).join(' -o ')} )`
-    : ''; // Empty inner expressions eg "( )" are not allowed
-  const expression = `( ( -type f ${extensionClause} ) ${includeSymlinks ? '-o -type l ' : ''})`;
-
-  const pathUtils = new RootPathUtils(rootDir);
-
-  const child = spawn('find', [...roots, ...expression.split(' ')]);
-  let stdout = '';
-  if (child.stdout == null) {
-    throw new Error(
-      'stdout is null - this should never happen. Please open up an issue at https://github.com/facebook/metro'
-    );
-  }
-  child.stdout.setEncoding('utf-8');
-  child.stdout.on('data', (data) => (stdout += data));
-
-  child.stdout.on('close', () => {
-    const lines = stdout
-      .trim()
-      .split('\n')
-      .filter((x) => !ignore(x));
-    const result: FileData = new Map();
-    let count = lines.length;
-    if (!count) {
-      callback(new Map());
-    } else {
-      lines.forEach((filePath) => {
-        fs.lstat(filePath, (err, stat) => {
-          if (!err && stat) {
-            result.set(pathUtils.absoluteToNormal(filePath), [
-              stat.mtime.getTime(),
-              stat.size,
-              0,
-              null,
-              stat.isSymbolicLink() ? 1 : 0,
-              null,
-            ]);
-          }
-          if (--count === 0) {
-            callback(result);
-          }
-        });
-      });
-    }
-  });
 }
 
 export default async function nodeCrawl(options: CrawlerOptions): Promise<CrawlResult> {
@@ -164,7 +133,6 @@ export default async function nodeCrawl(options: CrawlerOptions): Promise<CrawlR
     console,
     previousState,
     extensions,
-    forceNodeFilesystemAPI,
     ignore,
     rootDir,
     includeSymlinks,
@@ -177,10 +145,6 @@ export default async function nodeCrawl(options: CrawlerOptions): Promise<CrawlR
   abortSignal?.throwIfAborted();
 
   perfLogger?.point('nodeCrawl_start');
-  const useNativeFind =
-    !forceNodeFilesystemAPI && platform() !== 'win32' && (await hasNativeFindSupport());
-
-  debug('Using system find: %s', useNativeFind);
 
   return new Promise((resolve, reject) => {
     const callback: Callback = (fileData) => {
@@ -199,10 +163,15 @@ export default async function nodeCrawl(options: CrawlerOptions): Promise<CrawlR
       resolve(difference);
     };
 
-    if (useNativeFind) {
-      findNative(roots, extensions, ignore, includeSymlinks, rootDir, console, callback);
-    } else {
-      find(roots, extensions, ignore, includeSymlinks, rootDir, console, callback);
-    }
+    find(
+      roots,
+      extensions,
+      ignore,
+      includeSymlinks,
+      rootDir,
+      console,
+      previousState.fileSystem,
+      callback
+    );
   });
 }
