@@ -8,7 +8,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { TransformOptions } from './babel-core';
+import type { PluginItem } from './babel-core';
+
+interface LoadBabelConfigResult {
+  exts?: string;
+  presets?: PluginItem[];
+}
+
+const BABEL_CONFIG_NAMES = [
+  '.babelrc',
+  '.babelrc.js',
+  '.babelrc.cjs',
+  '.babelrc.mjs',
+  '.babelrc.json',
+  '.babelrc.cts',
+  'babel.config.js',
+  'babel.config.cjs',
+  'babel.config.mjs',
+  'babel.config.json',
+  'babel.config.cts',
+  'babel.config.ts',
+  'babel.config.mts',
+];
 
 /**
  * Returns a memoized function that checks for the existence of a
@@ -16,46 +37,41 @@ import type { TransformOptions } from './babel-core';
  * default React Native babelrc file and uses that.
  */
 export const loadBabelConfig = (function () {
-  let babelRC: Pick<TransformOptions, 'extends' | 'presets'> | null = null;
+  let result: LoadBabelConfigResult | null = null;
 
-  return function _getBabelRC({
-    projectRoot,
-    enableBabelRCLookup = true,
-  }: {
+  return function _getBabelRC(options: {
     projectRoot: string;
-    enableBabelRCLookup?: boolean;
-  }) {
-    if (babelRC !== null) {
-      return babelRC;
-    }
+    enableBabelRCLookup?: boolean | undefined;
+  }): LoadBabelConfigResult {
+    if (result == null) {
+      const { projectRoot, enableBabelRCLookup = true } = options;
+      result = {};
+      if (options.projectRoot && enableBabelRCLookup) {
+        // Check for various babel config files in the project root
+        // TODO(@kitten): We should move this to the `customTransformOptions` to make this
+        // participate in the cache key. We should also add `getCacheKey` to `babel-transformer`
+        // and then take this into account there
+        const foundBabelRCPath = BABEL_CONFIG_NAMES.find((configFileName) => {
+          return fs.existsSync(path.resolve(projectRoot, configFileName));
+        });
 
-    babelRC = {};
+        // Extend the config if a babel config file is found
+        if (foundBabelRCPath) {
+          result.exts = path.resolve(projectRoot, foundBabelRCPath);
+        }
+      }
 
-    if (projectRoot && enableBabelRCLookup) {
-      // Check for various babel config files in the project root
-      const possibleBabelRCPaths = ['.babelrc', '.babelrc.js', 'babel.config.js'];
-
-      const foundBabelRCPath = possibleBabelRCPaths.find((configFileName) =>
-        fs.existsSync(path.resolve(projectRoot, configFileName))
-      );
-
-      // Extend the config if a babel config file is found
-      if (foundBabelRCPath) {
-        babelRC.extends = path.resolve(projectRoot, foundBabelRCPath);
+      // Use the default preset for react-native if no babel config file is found
+      if (!result.exts) {
+        try {
+          result.presets = [require('expo/internal/babel-preset')];
+        } catch {
+          // TODO(@kitten): Temporary, since our E2E tests don't use monorepo
+          // packages consistently, including the `expo` package
+          result.presets = [require('babel-preset-expo')];
+        }
       }
     }
-
-    // Use the default preset for react-native if no babel config file is found
-    if (!babelRC.extends) {
-      try {
-        babelRC.presets = [require('expo/internal/babel-preset')];
-      } catch {
-        // TODO(@kitten): Temporary, since our E2E tests don't use monorepo
-        // packages consistently, including the `expo` package
-        babelRC.presets = [require('babel-preset-expo')];
-      }
-    }
-
-    return babelRC;
+    return result;
   };
 })();
