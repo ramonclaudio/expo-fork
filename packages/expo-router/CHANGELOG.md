@@ -6,12 +6,16 @@
 
 ### 🎉 New features
 
-- Add unstable_nativeProps to NativeTabs host ([#45408](https://github.com/expo/expo/pull/45408) by [@Ubax](https://github.com/Ubax))
-- [android] forward `accessibilityLabel` on `Stack.Toolbar.Button` and `Stack.Toolbar.Menu` to the icon's `contentDescription`, so TalkBack reads the icon-only toolbar buttons. ([#45433](https://github.com/expo/expo/pull/45433) by [@Ubax](https://github.com/Ubax))
-
 ### 🐛 Bug fixes
 
 ### 💡 Others
+
+## 56.0.3 — 2026-05-06
+
+### 🎉 New features
+
+- Add unstable_nativeProps to NativeTabs host ([#45408](https://github.com/expo/expo/pull/45408) by [@Ubax](https://github.com/Ubax))
+- [android] forward `accessibilityLabel` on `Stack.Toolbar.Button` and `Stack.Toolbar.Menu` to the icon's `contentDescription`, so TalkBack reads the icon-only toolbar buttons. ([#45433](https://github.com/expo/expo/pull/45433) by [@Ubax](https://github.com/Ubax))
 
 ## 56.0.2 — 2026-05-06
 
