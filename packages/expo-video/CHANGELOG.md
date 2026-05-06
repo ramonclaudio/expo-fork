@@ -6,13 +6,19 @@
 
 ### 🎉 New features
 
+### 🐛 Bug fixes
+
+### 💡 Others
+
+## 56.1.0 — 2026-05-06
+
+### 🎉 New features
+
 - [Android] Implement `exitFullscreen` to fix `MethodUnsupportedException`. ([#41836](https://github.com/expo/expo/pull/41836) by [@mensonones](https://github.com/mensonones))
 
 ### 🐛 Bug fixes
 
 - Fix `PictureInPictureHelperFragment` crashes on restoration after process death. ([#45426](https://github.com/expo/expo/pull/45426) by [@behenate](https://github.com/behenate) and [@dive](https://github.com/dive))
-
-### 💡 Others
 
 ## 56.0.2 — 2026-05-06
 

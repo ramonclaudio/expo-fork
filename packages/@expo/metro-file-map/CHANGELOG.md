@@ -6,13 +6,19 @@
 
 ### 🎉 New features
 
+### 🐛 Bug fixes
+
+### 💡 Others
+
+## 56.0.0-2 — 2026-05-06
+
+### 🎉 New features
+
 - Allow the on-demand filesystem to follow symlinks out of `watchFolders` to their targets ([#45460](https://github.com/expo/expo/pull/45460) by [@kitten](https://github.com/kitten))
 
 ### 🐛 Bug fixes
 
 - Fix serialized snapshot not including relative roots ([#45462](https://github.com/expo/expo/pull/45462) by [@kitten](https://github.com/kitten))
-
-### 💡 Others
 
 ## 56.0.0-1 — 2026-05-06
 
