@@ -8,6 +8,8 @@
 
 ### 🐛 Bug fixes
 
+- [iOS] Avoid logging the precompiled modules React Native fallback as a CocoaPods warning. ([#45431](https://github.com/expo/expo/pull/45431) by [@chrfalch](https://github.com/chrfalch))
+
 ### 💡 Others
 
 ## 56.0.0 — 2026-05-05
