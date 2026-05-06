@@ -4684,25 +4684,25 @@ SPEC CHECKSUMS:
   ExpoModulesCore: a05cdf8b02a6664779777f7ba9ef5b931beddd00
   ExpoModulesJSI: ea32f68254fb0bb09198bc0b40489d4a9df4c708
   ExpoModulesTestCore: 5660ab6b5928747366d4946580622a578865696a
-  ExpoModulesWorklets: 6527af35238f2daeb4532bb496e9a3d3dbe90efd
-  ExpoModulesWorkletsAdapter: 6fe9c4a24106782686c239a47838239d23baf793
-  ExpoNetwork: d05a2ddda5bfb6040a7dad644a9b09ef6db4dc21
-  ExpoNotifications: a1fef6c90f120ad7d1943bf1aca76afe71814f45
-  ExpoPrint: 53e287956fbe4fd70d762789bdf6f73ca7d59f69
-  ExpoRouter: 38e792ac3617b25f35e8c0c8754fed85467f4a2b
-  ExpoScreenCapture: 38d2c927dcfb4160305f244e5126515736a9b325
-  ExpoScreenOrientation: a6d9e26a8c8a6fb5c9d41567ff19a1cafe6de3a1
-  ExpoSecureStore: 46fcb1ef05d828ddebafae3649dfe704911c4794
-  ExpoSensors: dae6daee9d453395d558e3869e996200ccca9e1e
-  ExpoSharing: 00119b6d7b2cdfb3445b3d0f5fdebd7389bd9edd
-  ExpoSMS: f6194aada0eec2dad7ed450e0593b96a5ba9901d
-  ExpoSpeech: 24e65548b5f11cdca2ecc50c7f72e848ed9dfe4b
-  ExpoSQLite: 484b683b36fddecd8f2fe99bdd7152cf85bc4bea
-  ExpoStoreReview: 29fde8887bd95a86127955ddaa7ca14ca7eec90a
-  ExpoSymbols: fa3656a5d54f020c45555570e6b98d7fecd60ada
-  ExpoSystemUI: aaaabea25de250ab39c6004018d848597f50be01
-  ExpoTaskManager: 63f612b4ca72a39031b93efe7cffdcd80b9a2def
-  ExpoTrackingTransparency: 8684aab16ee0d3f9e66cd9062666f8a94a69390c
+  ExpoModulesWorklets: 1fa6d628e440cdd8789a3c1cb784eb329bdaba45
+  ExpoModulesWorkletsAdapter: ca4345efc7211286cc14b92109fd4ef98c469cef
+  ExpoNetwork: c5b6219f351d51b243b2bea907e70a01d82b4364
+  ExpoNotifications: e552771f0bb87c04e82d30ce3e44f8127d35d7cd
+  ExpoPrint: 2353f14da27faa5e41135b4a53df0540a5c0d231
+  ExpoRouter: 0613139ee73d67dfe922a458a82507244c50815b
+  ExpoScreenCapture: 52be1df629631b142007539259eaa3e9f420221e
+  ExpoScreenOrientation: 288a8d984cddf6a04e12ae9eaf97811df0871fef
+  ExpoSecureStore: f199bfdd1599c68499012f618ec5c1fbdda55014
+  ExpoSensors: 44feb8a5256a33ed136fe51bc91e464f1b37e9c4
+  ExpoSharing: 555444b61eff8720d3d425ffd6ab028bb5e27f3d
+  ExpoSMS: 8f596a6101b0b829cb0849df7fc27f3f70a97763
+  ExpoSpeech: a434962db14b99558a5e174f184959f86c962728
+  ExpoSQLite: 31dfd1a98c0fa47ad4346ca4cd64e82f3a919183
+  ExpoStoreReview: df8a49561a62fff8bb211af71514e4e6d55ebedb
+  ExpoSymbols: 33183e53a31ceea1c3c80b66beb2401fcf21de54
+  ExpoSystemUI: eae55113bfd43e7ed70ac4ab9f846bf5c8fe8f85
+  ExpoTaskManager: 55703310126050e7e34c22f89dea865e11de6027
+  ExpoTrackingTransparency: cf6e52682809cfc1fc66f19cd399dca0428e94eb
   ExpoUI: 53fb4b34e5d1e073ab68a243e0a60b270f0a3410
   ExpoVideo: 730758ca75bcf61d30decedbc48e3af484b8872c
   ExpoVideoThumbnails: a7024e5f498e23df6aa305f6d165f427077fc282
@@ -4721,11 +4721,11 @@ SPEC CHECKSUMS:
   FirebaseRemoteConfigInterop: 85bdce8babed7814816496bb6f082bc05b0a45e1
   FirebaseSessions: f5c6bfeb66a7202deaf33352017bb6365e395820
   fmt: 530618a01105dae0fa3a2f27c81ae11fa8f67eac
-  glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
+  glog: e56ede4028c4b7418e6b1195a36b1656bb35e225
   GoogleAppMeasurement: 8a82b93a6400c8e6551c0bcd66a9177f2e067aed
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
   GoogleUtilities: 00c88b9a86066ef77f0da2fab05f65d7768ed8e1
-  hermes-engine: 912e24e9d788b04c9f50eaf3721ce9968b2d3bf9
+  hermes-engine: 971c315ad976a4dcbf09795cb72e85ea3f7200d9
   libavif: 5f8e715bea24debec477006f21ef9e95432e254d
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
@@ -4737,7 +4737,7 @@ SPEC CHECKSUMS:
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
   PromisesSwift: 9d77319bbe72ebf6d872900551f7eeba9bce2851
   Quick: 83e25bf349dd84f894b024f48033274512d6129b
-  RCT-Folly: 121436bcc4611f6bde5c09bf35f0a7a82cef1969
+  RCT-Folly: 36c4f904fb6cd0219dcb76b94e9502d2a72fab0b
   RCTDeprecation: 225e022b85a206cf0883a909c4a114159783363c
   RCTRequired: 827a95c181af0886a11e21bc66c084088cf87839
   RCTSwiftUI: 7babb07156ae0a8e5ea97f77e43959ddaca2c6f2
